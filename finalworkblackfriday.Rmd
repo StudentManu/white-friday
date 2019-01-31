@@ -1,0 +1,316 @@
+---
+title: "Black Fridat Data Set"
+author: "manu"
+date: "January 26, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(tidyverse)
+```
+
+### Introduction
+
+A study of sales trough consumer behaviours.
+
+The following data analysis explores the "black friday" dataset of 550 000 observations about the black Friday in a retail store, it contains different kinds of variables either numerical or categorical. It contains missing values.
+
+In the present document, after some exploration and visualisations some models are trained so to predict the amount of money a customer will spend.
+
+The data can be found in the following link <https://www.kaggle.com/mehdidag/black-friday> from Kaggle.
+
+### Data import
+
+After reading the data and importing the necessary packages we visualise the first few rows.
+
+```{r echo=FALSE}
+dataset0 <- read.csv("blackfriday.csv", sep = ",")
+head(dataset0, 5)
+```
+
+### Feature exploration
+
+```{r echo=FALSE}
+getColumnTypes <- function(df){
+  columns_datatypes <- as.data.frame(sapply(df, class), colnames = names(df))
+  colnames(columns_datatypes)<- c('Column type')
+  return(columns_datatypes)
+}
+
+getColumnsWithNAs <- function(df){
+  cols_with_na <- (colMeans(is.na(df)))[(colMeans(is.na(df)))>0]
+  return(cols_with_na)
+}
+dataset.recomm <- dataset0
+```
+
+In this segment we will explore the variables and prepare them so to have a better structure. By better structure here we mean a data set which follows what we call the tidyverse philosophy, that is, for the columns we have the variables and in the rows each variable. In their intersect we'll have the value of the column for that observation.
+
+We have noticed that each row ain't a user but a product bought by a user. This ain't incorrect, it depends on the purpose of each analyst. In our case (at least as a prime approximation), we'd rather prefer to have a user in each row. Hence, we modified our dataframe accordingly. As information will be lost, in order to lose fewer amount of information we count the number of products bought ("Product_ID"), as well as the categories if any ("Product_Category_1", "Product_Category_2", "Product_Category_2") and we sum the purchase quantity of the products, we believe that by doing this we will be losing less information. We rename some columns as well. 
+
+For doing this we embed pure SQL with the right package (check the Rmd for more details). Our result is as follows:
+
+```{r echo=FALSE, include=FALSE}
+library(sqldf)
+
+# dataset <- sqldf('SELECT User_ID, COUNT(Product_ID), COUNT(Product_Category_1), COUNT(Product_Category_2), COUNT(Product_Category_3), SUM(Purchase)
+#       FROM  dataset0
+#       GROUP BY  User_ID')
+
+dataset <- sqldf('SELECT User_ID IDUSER, COUNT(Product_ID) IDPROD, Gender GENDER, Age AGE, Occupation OCCUPATION, City_Category CITY_CAT, Stay_In_Current_City_Years YEARS_IN_CITY, Marital_Status IS_MARRIED, COUNT(Product_Category_1) PROD_CAT1, COUNT(Product_Category_2) PROD_CAT2, COUNT(Product_Category_3) PROD_CAT3, SUM(Purchase) PURCHASE
+      FROM  dataset0
+      GROUP BY  User_ID')
+```
+
+```{r echo=FALSE}
+head(dataset, 3)
+```
+
+Let's check the  data type of the columns. That is important so to be able to analyse the data properly. For doing this we run a funtion created by us (check the Rmd for more details).
+
+```{r echo=FALSE}
+columnType <- getColumnTypes(dataset)
+columnType
+```
+
+
+```{r include=FALSE}
+range_userid <- range(dataset$IDUSER) # int
+head(table(dataset$IDPROD)) # Factor
+(table(dataset$GENDER)) # Factor
+(table(dataset$AGE)) # Factor
+(table(dataset$OCCUPATION)) # Factor
+(table(dataset$CITY_CAT)) # Factor
+(table(dataset$YEARS_IN_CITY)) # Factor
+(table(dataset$IS_MARRIED)) # Factor
+(table(dataset$PROD_CAT1)) # Factor
+(table(dataset$PROD_CAT2)) # Factor
+(table(dataset$PROD_CAT3)) # Factor
+range_purchase <- range(dataset$PURCHASE) # int
+
+str(dataset)
+```
+
+Some of the columns (Occupation, Marital_Status, Product_Category_1, Product_Category_2 and Product_Category_3) do not have the desired so we modify them accordingly. Hence we convert them and now are treated as factors.
+On the other hand, 'User_ID' has been substracted one million losing ain't information. Initial range of 'User_ID' was `r range_userid`. The values of the "Purchase" field we consider them very high, we thought on dividing in per 1000 but finally decided to leaeve it as it is.
+
+```{r include=FALSE}
+dataset$IDUSER <- (dataset$IDUSER - 1000000)
+dataset$GENDER <- as.factor(dataset$GENDER)
+dataset$OCCUPATION <- as.factor(dataset$OCCUPATION)
+dataset$IS_MARRIED <- as.factor(dataset$IS_MARRIED)
+dataset$PROD_CAT1 <- as.factor(dataset$PROD_CAT1)
+dataset$PROD_CAT2 <- as.factor(dataset$PROD_CAT2)
+dataset$PROD_CAT3 <- as.factor(dataset$PROD_CAT3)
+
+dataset.recomm <- dataset
+
+# tail(dataset)
+```
+
+Once we have the features prepared, we can get a summary of them due to have an idea about them. Of course this makes more sense in the numerical fields. Here the summary of "Purchase".
+
+```{r echo=FALSE}
+summary(dataset$PURCHASE)
+
+# apply(dataset0, 2, function(x) any(is.na(x)))
+```
+
+Our initial dataset did have missing values, but due to our modification we've got none now.
+
+We can run our funtion created before that finds columns with null values and the percentage of them for the initial dataset and for the new dataset.
+
+Columns with missing values in the initial dataset:
+
+```{r echo=FALSE}
+getColumnsWithNAs(dataset0)
+```
+
+Columns with missing values in the new dataset:
+
+```{r echo=FALSE}
+getColumnsWithNAs(dataset)
+```
+We got no null values now.
+
+In case one desides to continue with the initial dataset that have products and no users as each observation, then in case of need to remove null values we recommend to erase the "Product_Category_3" column as it has got almost 70 % of missing values and then erase each observation with NAs for "Product_Category_2". Of course information is lost but is one of the many paths that can be followed.
+
+### On the visualisation of our data set
+
+A continuation, we'll proceed to perform some visualisations. The way we have feature engineered and modified our initial dataset now we've got in each row a user and in each column a value. Their intersect is a single value as explained before.
+
+#### Gender
+
+```{r echo=FALSE}
+# Create a basic bar
+pie_gender = ggplot(dataset, aes(x="", y=GENDER, fill=GENDER)) + geom_bar(stat="identity", width=1)
+
+# Convert to pie (polar coordinates) and add labels
+pie_gender = pie_gender + coord_polar("y", start=0) 
+
+pie_gender
+
+```
+
+In this figure we can observe that more that 75% of our users are male.
+
+```{r echo=FALSE}
+ggplot(data = dataset) +
+  geom_bar(mapping = aes(x = dataset$GENDER, fill = dataset$GENDER)) +
+  facet_wrap(~dataset$CITY_CAT)
+```
+
+In the above plot we can see the amount of people per gender and per city. It kind of seems that many people of city category C  bought in this retail shop in both genders. The same for city category B respect to A. Could be city category C is plenty of richer people
+
+#### AGE
+
+```{r echo=FALSE}
+ggplot(data = dataset) +
+  geom_bar(mapping = aes(x = AGE, fill = GENDER)) +
+  facet_wrap(~CITY_CAT, nrow = 4)
+```
+
+#### Occupation
+
+```{r echo=FALSE}
+ggplot(data = dataset) +
+  geom_bar(mapping = aes(x = OCCUPATION, fill = GENDER)) +
+  facet_wrap(~AGE, nrow = 4)
+```
+
+Here we can observe the distribution of the occupation through the age ranges. It is interesting to observe how there are many young people working in the occupation number 5. Maybe this is the status of student or trainee. Apparently most are men but this is no surprise nor interesting for the fact we already observed that our data contained in its total a high number of male gender. If we would know the city name maybe we could check the proportion of the gender distribution in the goverment statistics and try to compare.
+
+```{r echo=FALSE}
+ggplot(data = dataset) +
+  geom_bar(mapping = aes(x = dataset$CITY_CAT, fill = dataset$GENDER)) +
+  facet_wrap(~dataset$AGE, nrow = 4)
+```
+
+Mosaic plot for Occupation vs age.
+
+```{r echo=FALSE}
+library(stats)
+
+mosaicplot(~ OCCUPATION + AGE, data = dataset, 
+           color=2:7,  las = 1)
+```
+
+#### PURCHASE
+
+```{r echo=FALSE}
+ggplot(dataset) +
+  geom_histogram(aes(dataset$PURCHASE, fill = dataset$CITY_CAT))
+```
+
+Here we can't say much about the histogram of "purchase", but we observe that the stayment in the current city is not quite unbalanced.
+
+```{r echo=FALSE}
+
+ggplot(data = dataset, mapping = aes(x = CITY_CAT, y = PURCHASE)) + 
+  geom_point( position = "jitter" )
+
+```
+
+This makes no much sense but we wanted to include some scatterplot.
+
+The above representation makes more sense if printed through a box plot as bellow.
+
+```{r echo=FALSE}
+ggplot(data = dataset, mapping = aes(x=CITY_CAT, y = PURCHASE)) + 
+  geom_boxplot() + 
+  coord_flip()
+
+```
+
+We can observe some outliers mostly in city class A.
+
+### On the model fitting of the black fridat dataset modified
+
+We are going to predict the amout spent.
+
+As our goal is not the to predict accurately we are going to fit a linear regression and xgboost models just to show some syntax here.
+
+We separate the data in training set (75%) and test set(25%.
+
+As an evaluation method we will use the RMSE (Root Mean Square Error).
+
+We erase column "USERID" as is not useful for prediction. We either include product variables as are known post purchase.
+
+```{r echo=FALSE, message=FALSE, include=FALSE}
+library(caret)
+
+dataset$IDUSER <- NULL
+dataset$IDPROD <- NULL
+dataset$PROD_CAT1 <- NULL
+dataset$PROD_CAT2 <- NULL
+dataset$PROD_CAT3 <- NULL
+
+set.seed(666)
+training.id <- createDataPartition(dataset$PURCHASE, p = 0.75, list = FALSE)
+
+train.dataset <- dataset[training.id,]
+
+test.dataset <- dataset[-training.id,]
+```
+
+```{r echo=FALSE}
+
+fit.lm <- lm(train.dataset$PURCHASE ~ ., data = train.dataset)
+summary(fit.lm)
+```
+
+Our goal ain't inference but we'll comment a bit the results.
+
+In the results we can observe how apparently the gender plays an 'important' role, as well as city category c.
+
+```{r echo=FALSE}
+pred.lm <- predict(fit.lm, test.dataset)
+
+rmse.lm <- RMSE(pred.lm, test.dataset$PURCHASE)
+```
+
+After testing our data we find out the RMSE for the linear model is `r rmse.lm`. This is useful for comparing models.
+
+Now we are going to implement, train and test a random forest model so to compete with the linear regretion fitted before. For more specification about this technique check <https://www.kdnuggets.com/2017/10/random-forests-explained.html>.
+
+```{r echo=FALSE, include=FALSE}
+
+library(randomForest)
+library(caret)
+
+train.dataset = train.dataset %>% mutate_if(is.character, as.factor)
+test.dataset = test.dataset %>% mutate_if(is.character, as.factor)
+
+fit.randfor <- randomForest::randomForest(train.dataset$PURCHASE ~ ., data = train.dataset, cv = 5)
+
+pred.randfor <- predict(fit.randfor, test.dataset)
+
+rmse.randfor <- RMSE(pred.randfor, test.dataset$PURCHASE)
+
+```
+
+```{r echo=FALSE}
+varImpPlot(fit.randfor)
+```
+
+Above we print the variable importance according to random forest methodology. As we can observe the most important variable is city category, followed by occupation.
+
+The RMSE result of training a random forest with a cross validation of 5 has been `r rmse.randfor`, which is higher than the one from the linear model. Hence, if we qould have to choose between them we would go for the linear model (strange result but whatever...).
+
+#### A brief scent on recommenders system
+
+With  the initial dataset we'll create a basic recommender system.
+
+```{r}
+dataset.recomm$Product_Category_1 <- NULL
+dataset.recomm$Product_Category_2 <- NULL
+dataset.recomm$Product_Category_3 <- NULL
+dataset.recomm$Marital_Status <- as.factor(dataset.recomm$Marital_Status)
+
+dataset.recomm = dataset.recomm %>% mutate_if(is.character, as.factor)
+dataset.recomm
+```
